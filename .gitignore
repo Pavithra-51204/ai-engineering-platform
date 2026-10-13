@@ -1,0 +1,23 @@
+# Python virtual environment
+.venv/
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+
+# Test and lint caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local secrets and environment configuration
+.env
+.env.*
+
+# Allow a safe example configuration to be committed
+!.env.example
+
+# Build outputs
+dist/
+build/
