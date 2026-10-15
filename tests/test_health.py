@@ -27,3 +27,10 @@ def test_unknown_endpoint_returns_404() -> None:
     response = client.get("/this-route-does-not-exist")
 
     assert response.status_code == 404
+
+
+def test_health_response_includes_request_id() -> None:
+    response = client.get("/health/live")
+
+    assert response.status_code == 200
+    assert response.headers.get("x-request-id")
