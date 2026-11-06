@@ -1,28 +1,70 @@
+import os
 from collections.abc import Generator
 from uuid import uuid4
 
 import pytest
+from dotenv import load_dotenv
 from fastapi.testclient import TestClient
+from sqlalchemy import Engine, create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
-from app.api.routes.projects import get_project_service
+from app.core.database import Base, get_db
 from app.main import app
-from app.repositories.project_repository import ProjectRepository
-from app.services.project_service import ProjectService
+from app.models import Project  # noqa: F401
+
+load_dotenv()
+
+
+@pytest.fixture(scope="session")
+def test_engine() -> Generator[Engine, None, None]:
+    database_url = os.environ["TEST_DATABASE_URL"]
+
+    engine = create_engine(
+        database_url,
+        pool_pre_ping=True,
+    )
+
+    Base.metadata.create_all(bind=engine)
+
+    yield engine
+
+    engine.dispose()
 
 
 @pytest.fixture
-def client() -> Generator[TestClient, None, None]:
-    repository = ProjectRepository()
+def db_session(test_engine: Engine) -> Generator[Session, None, None]:
+    connection = test_engine.connect()
+    transaction = connection.begin()
 
-    def override_project_service() -> ProjectService:
-        return ProjectService(repository)
+    test_session_local = sessionmaker(
+        bind=connection,
+        autoflush=False,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
 
-    app.dependency_overrides[get_project_service] = override_project_service
+    session = test_session_local()
 
-    with TestClient(app) as test_client:
-        yield test_client
+    try:
+        yield session
+    finally:
+        session.close()
+        transaction.rollback()
+        connection.close()
 
-    app.dependency_overrides.clear()
+
+@pytest.fixture
+def client(db_session: Session) -> Generator[TestClient, None, None]:
+    def override_get_db() -> Generator[Session, None, None]:
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_create_project(client: TestClient) -> None:
@@ -132,3 +174,51 @@ def test_project_data_is_isolated_between_tests(
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_list_projects_with_limit(client: TestClient) -> None:
+    for index in range(5):
+        client.post(
+            "/api/v1/projects",
+            json={"name": f"Project {index}"},
+        )
+
+    response = client.get("/api/v1/projects?limit=2")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+
+
+def test_list_projects_with_offset(client: TestClient) -> None:
+    for index in range(5):
+        client.post(
+            "/api/v1/projects",
+            json={"name": f"Project {index}"},
+        )
+
+    response = client.get("/api/v1/projects?limit=2&offset=2")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+
+
+def test_list_projects_rejects_invalid_limit(client: TestClient) -> None:
+    response = client.get("/api/v1/projects?limit=0")
+
+    assert response.status_code == 422
+
+
+def test_list_projects_rejects_negative_offset(
+    client: TestClient,
+) -> None:
+    response = client.get("/api/v1/projects?offset=-1")
+
+    assert response.status_code == 422
+
+
+def test_list_projects_rejects_limit_above_maximum(
+    client: TestClient,
+) -> None:
+    response = client.get("/api/v1/projects?limit=101")
+
+    assert response.status_code == 422

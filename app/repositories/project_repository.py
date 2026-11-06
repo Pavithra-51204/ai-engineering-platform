@@ -1,26 +1,41 @@
-from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from app.schemas.project import ProjectCreate, ProjectResponse
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models import Project
+from app.schemas.project import ProjectCreate
 
 
 class ProjectRepository:
-    def __init__(self) -> None:
-        self._projects: dict[UUID, ProjectResponse] = {}
+    def __init__(self, session: Session) -> None:
+        self._session = session
 
-    def create(self, project_data: ProjectCreate) -> ProjectResponse:
-        project = ProjectResponse(
-            id=uuid4(),
+    def create(self, project_data: ProjectCreate) -> Project:
+        project = Project(
             name=project_data.name,
             description=project_data.description,
-            created_at=datetime.now(UTC),
         )
 
-        self._projects[project.id] = project
+        self._session.add(project)
+        self._session.flush()
+        self._session.refresh(project)
+
         return project
 
-    def list_all(self) -> list[ProjectResponse]:
-        return list(self._projects.values())
+    def list_all(
+        self,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> list[Project]:
+        statement = (
+            select(Project)
+            .order_by(Project.created_at.desc(), Project.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
 
-    def get_by_id(self, project_id: UUID) -> ProjectResponse | None:
-        return self._projects.get(project_id)
+        return list(self._session.scalars(statement).all())
+
+    def get_by_id(self, project_id: UUID) -> Project | None:
+        return self._session.get(Project, project_id)

@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     environment: str = "development"
     log_level: str = "INFO"
 
+    database_url: str = (
+        "postgresql+psycopg://app_user:"
+        "local_dev_password_change_me@localhost:5433/"
+        "ai_engineering_platform"
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:
